@@ -1,0 +1,294 @@
+{
+  "name": "Clinica Multicanal",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "maxResults": 1,
+        "filters": {
+          "readStatus": "unread"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "id": "edc0f103-0320-4946-847e-d8145542b32f",
+      "name": "Gmail Trigger",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "fJRitLCHmLmXVL16",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Remitente: {{ $json.from.text }}\nAsunto: {{ $json.subject }}\nCuerpo: {{ $json.text }}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "Eres el modelo evaluador de mensajes de una clínica. Analiza la semántica del correo entrante, determina su nivel de urgencia y devuelve una clasificación estructurada.  Reglas de prioridad: - \"maxima\": urgencia médica, dolor intenso, emergencia, cirugía inminente, pacientes sin respuesta, o el uso de palabras como \"urgencia\", \"urgente\" o \"emergencia\". - \"normal\": cualquier otro caso (consultas generales, agendamiento, facturación, información).  Responde ÚNICAMENTE con un JSON válido, sin markdown, sin comillas de código y sin texto adicional, con exactamente estas claves: {   \"prioridad\": \"maxima\" | \"normal\",   \"resumen\": \"resumen de máximo 25 palabras\",   \"accion_requerida\": \"descripción breve de la tarea a realizar\",   \"telefono_e164\": \"teléfono del remitente en formato internacional E.164 (ej. +573001234567) o cadena vacía si no aparece\" }"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        224,
+        0
+      ],
+      "id": "9cbf3d4d-2d22-43a2-a330-8db3a1fc49ab",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.8-flash",
+        "options": {
+          "temperature": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        160,
+        208
+      ],
+      "id": "679709fd-32f5-43b2-9b40-cbab83c6ee56",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "NsuPugjpRukYR8GY",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.text || '';\nconst clean = raw.replace(/```json/gi, '').replace(/```/g, '').trim();\nlet data;\ntry {\n  data = JSON.parse(clean);\n} catch (e) {\n  data = {\n    prioridad: 'normal',\n    resumen: 'No se pudo interpretar la respuesta de la IA',\n    accion_requerida: 'Revisar manualmente',\n    telefono_e164: ''\n  };\n}\nconst mail = $('Gmail Trigger').first().json;\nreturn [{\n  json: {\n    ...data,\n    prioridad: String(data.prioridad || 'normal').toLowerCase(),\n    remitente: (mail.from && mail.from.text) ? mail.from.text : '',\n    asunto: mail.subject || '',\n    threadId: mail.threadId || ''\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        0
+      ],
+      "id": "910076b3-f7ac-415b-bfe8-23dd19b2c682",
+      "name": "Parsear JSON de Gemini"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "efed4718-2207-4356-bc2f-257c39de9b3d",
+              "leftValue": "={{ $json.prioridad }}",
+              "rightValue": "maxima",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {
+          "ignoreCase": true
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        768,
+        0
+      ],
+      "id": "97a4c511-b988-4aab-9b56-3db2069d54f7",
+      "name": "If prioridad máxima"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "urgencias-clinica",
+          "mode": "name"
+        },
+        "text": "=:rotating_light: *ALERTA PRIORIDAD MAXIMA* <!here>\n*De:* {{ $json.remitente }}\n*Asunto:* {{ $json.asunto }}\n*Resumen IA:* {{ $json.resumen }}\n*Accion requerida:* {{ $json.accion_requerida }}\n*Thread ID:* {{ $json.threadId }}",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        1008,
+        -32
+      ],
+      "id": "1fb9c493-03b7-4e26-a705-bd643c5f28cc",
+      "name": "Slack - Alerta critica",
+      "webhookId": "30fc5c8d-5e97-4045-8d29-07681d800314",
+      "credentials": {
+        "slackApi": {
+          "id": "dCbMdcVnkxvoAoay",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "from": "=+17372508034",
+        "to": "={{ $('Parsear JSON de Gemini').item.json.telefono_e164 }}",
+        "toWhatsapp": true,
+        "message": "=Hola, recibimos tu mensaje con asunto \"{{ $('Parsear JSON de Gemini').item.json.asunto }}\" y lo marcamos como urgente. Nuestro equipo médico ya fue alertado y te contactará en breve. - Clínica",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        1184,
+        -32
+      ],
+      "id": "1d4cf7c4-3d9a-48b9-a8c2-140c40785b98",
+      "name": "WhatsApp (Twilio) - Mensaje al paciente",
+      "credentials": {
+        "twilioApi": {
+          "id": "Q2Wbg2xLgPshC5F3",
+          "name": "Twilio account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "resumen-bandeja",
+          "mode": "name"
+        },
+        "text": "=:email: *Resumen automatico de correo*\n*Prioridad:* {{ $json.prioridad }}\n*De:* {{ $json.remitente }}\n*Asunto:* {{ $json.asunto }}\n*Resumen IA:* {{ $json.resumen }}",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        1024,
+        176
+      ],
+      "id": "fc0d7085-3dcf-4cc2-b06d-7a0dc76a799a",
+      "name": "Slack - Resumen al equipo",
+      "webhookId": "a01c8728-6624-4978-867a-8d066fc1346e",
+      "credentials": {
+        "slackApi": {
+          "id": "dCbMdcVnkxvoAoay",
+          "name": "Slack account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Parsear JSON de Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear JSON de Gemini": {
+      "main": [
+        [
+          {
+            "node": "If prioridad máxima",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If prioridad máxima": {
+      "main": [
+        [
+          {
+            "node": "Slack - Alerta critica",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack - Resumen al equipo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack - Alerta critica": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp (Twilio) - Mensaje al paciente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "d8a6486d-ba40-4834-b373-6bb1057ab34f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "e603f7f09f685e2b70fc8da06bd57d17f72ad95dba487015b08357e5b4eb48f0"
+  },
+  "nodeGroups": [],
+  "id": "RGavjoit30XtMjyv",
+  "tags": []
+}
